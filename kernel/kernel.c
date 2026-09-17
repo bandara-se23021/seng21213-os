@@ -26,7 +26,298 @@
 #include "../include/types.h"
 #include "process.h"
 #include "scheduler.h"
+#include "thread.h"
+#include "mutex.h"
+#include "semaphore.h"
 
+#define BUFFER_SIZE 4
+#define BUFFER_ITEMS 2
+
+/* -----------------------------------------------------------
+ * Stage 2 - Bounded Buffer
+ * ----------------------------------------------------------- */
+
+static int buffer[BUFFER_SIZE];
+static int buffer_in = 0;
+static int buffer_out = 0;
+
+static semaphore_t empty;
+static semaphore_t full;
+static semaphore_t buffer_mutex;
+
+/* -----------------------------------------------------------
+ * Stage 2 - Mutex demonstration
+ * ----------------------------------------------------------- */
+
+static volatile int myglobal = 0;
+static mutex_t myglobal_mutex;
+
+/* Used for controlled race-condition demonstration */
+static int race_read_a = 0;
+static int race_read_b = 0;
+
+/* -----------------------------------------------------------
+ * Basic thread demonstration
+ * ----------------------------------------------------------- */
+
+static void thread_a(void *arg)
+{
+    (void)arg;
+
+    vga_printf("Thread A running\n");
+}
+
+static void thread_b(void *arg)
+{
+    (void)arg;
+
+    vga_printf("Thread B running\n");
+}
+
+/* -----------------------------------------------------------
+ * Race condition WITHOUT mutex
+ *
+ * The current thread implementation runs functions sequentially,
+ * so this creates a controlled lost-update demonstration.
+ * Both threads read the same value before the updates are applied.
+ * ----------------------------------------------------------- */
+
+static void race_thread_a(void *arg)
+{
+    (void)arg;
+
+    race_read_a = myglobal;
+
+    vga_printf("Thread A reads myglobal = %d\n",
+               race_read_a);
+}
+
+static void race_thread_b(void *arg)
+{
+    (void)arg;
+
+    race_read_b = myglobal;
+
+    vga_printf("Thread B reads myglobal = %d\n",
+               race_read_b);
+}
+
+/* -----------------------------------------------------------
+ * Race condition WITH mutex
+ * ----------------------------------------------------------- */
+
+static void mutex_thread_a(void *arg)
+{
+    (void)arg;
+
+    mutex_lock(&myglobal_mutex);
+
+    myglobal++;
+
+    vga_printf("Thread A updates myglobal = %d\n",
+               myglobal);
+
+    mutex_unlock(&myglobal_mutex);
+}
+
+static void mutex_thread_b(void *arg)
+{
+    (void)arg;
+
+    mutex_lock(&myglobal_mutex);
+
+    myglobal++;
+
+    vga_printf("Thread B updates myglobal = %d\n",
+               myglobal);
+
+    mutex_unlock(&myglobal_mutex);
+}
+
+/* -----------------------------------------------------------
+ * Bounded Buffer Producer-Consumer
+ *
+ * Three semaphores:
+ *
+ * empty        -> number of empty buffer slots
+ * full         -> number of filled buffer slots
+ * buffer_mutex -> protects the buffer
+ * ----------------------------------------------------------- */
+
+static int producer_next_item = 1;
+
+static void producer(void *arg)
+{
+    (void)arg;
+
+    sem_wait(&empty);
+
+    sem_wait(&buffer_mutex);
+
+    buffer[buffer_in] = producer_next_item;
+
+    vga_printf("Producer: produced %d\n",
+               producer_next_item);
+
+    producer_next_item++;
+
+    buffer_in = (buffer_in + 1) % BUFFER_SIZE;
+
+    sem_signal(&buffer_mutex);
+
+    sem_signal(&full);
+}
+
+static void consumer(void *arg)
+{
+    int item;
+
+    (void)arg;
+
+    sem_wait(&full);
+
+    sem_wait(&buffer_mutex);
+
+    item = buffer[buffer_out];
+
+    vga_printf("Consumer: consumed %d\n",
+               item);
+
+    buffer_out = (buffer_out + 1) % BUFFER_SIZE;
+
+    sem_signal(&buffer_mutex);
+
+    sem_signal(&empty);
+}
+
+/* -----------------------------------------------------------
+ * Stage 2 Demonstration
+ * ----------------------------------------------------------- */
+
+static void stage2_demo(void)
+{
+    int thread_a_id;
+    int thread_b_id;
+
+    int race_a_id;
+    int race_b_id;
+
+    int mutex_a_id;
+    int mutex_b_id;
+
+    int producer_id;
+    int consumer_id;
+
+    vga_printf("\n");
+    vga_printf("========================================\n");
+    vga_printf(" Stage 2: Threads, Mutex & Semaphore\n");
+    vga_printf("========================================\n");
+
+    /* -------------------------------------------------------
+     * 1. Basic Threads
+     * ------------------------------------------------------- */
+
+    vga_printf("\n--- Threads ---\n");
+
+    thread_a_id = thread_create(thread_a, 0);
+    thread_b_id = thread_create(thread_b, 0);
+
+    thread_run(thread_a_id);
+    thread_run(thread_b_id);
+
+    /* -------------------------------------------------------
+     * 2. Race condition WITHOUT mutex
+     * ------------------------------------------------------- */
+
+    vga_printf("\n--- Race Condition: Without Mutex ---\n");
+
+    myglobal = 0;
+    race_read_a = 0;
+    race_read_b = 0;
+
+    race_a_id = thread_create(race_thread_a, 0);
+    race_b_id = thread_create(race_thread_b, 0);
+
+    /*
+     * Both threads read myglobal before either update.
+     * This represents the classic lost-update race.
+     */
+
+    thread_run(race_a_id);
+    thread_run(race_b_id);
+
+    myglobal = race_read_a + 1;
+
+    vga_printf("Expected myglobal = 2\n");
+    vga_printf("Actual myglobal   = %d\n",
+               myglobal);
+
+    vga_printf("Race condition demonstrated!\n");
+
+    /* -------------------------------------------------------
+     * 3. Race condition WITH mutex
+     * ------------------------------------------------------- */
+
+    vga_printf("\n--- Race Condition: With Mutex ---\n");
+
+    myglobal = 0;
+
+    mutex_init(&myglobal_mutex);
+
+    mutex_a_id = thread_create(mutex_thread_a, 0);
+    mutex_b_id = thread_create(mutex_thread_b, 0);
+
+    thread_run(mutex_a_id);
+    thread_run(mutex_b_id);
+
+    vga_printf("Expected myglobal = 2\n");
+    vga_printf("Actual myglobal   = %d\n",
+               myglobal);
+
+    vga_printf("Mutex protected update successful!\n");
+
+    /* -------------------------------------------------------
+     * 4. Bounded Buffer Producer-Consumer
+     * ------------------------------------------------------- */
+
+    vga_printf("\n--- Bounded Buffer Producer-Consumer ---\n");
+
+    buffer_in = 0;
+    buffer_out = 0;
+    producer_next_item = 1;
+
+    /*
+     * BUFFER_SIZE empty slots initially.
+     */
+    sem_init(&empty, BUFFER_SIZE);
+
+    /*
+     * No items are available initially.
+     */
+    sem_init(&full, 0);
+
+    /*
+     * Buffer is initially unlocked.
+     */
+    sem_init(&buffer_mutex, 1);
+
+    /*
+     * Create the producer and consumer once.
+     * The same thread objects are executed for each item.
+     */
+    producer_id = thread_create(producer, 0);
+    consumer_id = thread_create(consumer, 0);
+
+    for (int i = 0; i < BUFFER_ITEMS; i++)
+    {
+        thread_run(producer_id);
+        thread_run(consumer_id);
+    }
+
+    vga_printf("Producer-Consumer completed successfully.\n");
+
+    vga_printf("\n");
+}
 
 static void process_a(void)
 {
@@ -199,7 +490,6 @@ static void cmd_mem(void)
     vga_puts_color("\n  TODO: Use BIOS int 0x15, EAX=0xE820 to get real memory map\n\n",
                    VGA_YELLOW, VGA_BLACK);
 }
-
 
 static void cmd_ps(void)
 {
@@ -414,6 +704,20 @@ void kernel_main(void)
     process_create(process_a);
     process_create(process_b);
 
+    /*
+     * Initialise the Stage 2 thread system
+     * before creating any threads.
+     */
+    thread_init();
+
+    /*
+     * Run Stage 2 demonstrations.
+     */
+    stage2_demo();
+
+    /*
+     * Start the interactive shell.
+     */
     shell_run();
 
     /* Should never reach here */
