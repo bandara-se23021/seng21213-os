@@ -49,7 +49,9 @@ KERNEL_ASM_OBJ := build/kernel_entry.o
 
 KERNEL_C_SRCS  := kernel/kernel.c \
                    kernel/vga.c    \
-                   kernel/keyboard.c
+                   kernel/keyboard.c \
+									 kernel/process.c \
+									  kernel/scheduler.c
 
 # Add your new source files below as the course progresses:
 # Lecture 09: kernel/process.c kernel/scheduler.c

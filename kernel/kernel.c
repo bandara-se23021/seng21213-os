@@ -24,6 +24,25 @@
 #include "vga.h"
 #include "keyboard.h"
 #include "../include/types.h"
+#include "process.h"
+#include "scheduler.h"
+
+
+static void process_a(void)
+{
+    while (1)
+    {
+        /* Process A */
+    }
+}
+
+static void process_b(void)
+{
+    while (1)
+    {
+        /* Process B */
+    }
+}
 
 /* ---------------------------------------------------------------------------
  * Forward declarations of shell commands
@@ -36,6 +55,7 @@ static void cmd_mem(void);
 static void cmd_version(void);
 static void cmd_color(void);
 static void cmd_halt(void);
+static void cmd_ps(void);
 
 /* ---------------------------------------------------------------------------
  * Utility: minimal string helpers (no libc in a freestanding kernel!)
@@ -129,6 +149,7 @@ static void cmd_help(void)
     vga_puts("  about   – About this OS and course\n");
     vga_puts("  echo    – Echo text to screen\n");
     vga_puts("  mem     – Memory map (stub)\n");
+    vga_puts("  ps      - List processes\n");
     vga_puts("  version - Show OS version\n");
     vga_puts("  color   - Test VGA colours\n");
     vga_puts("  halt    - Halt the CPU\n");
@@ -177,6 +198,69 @@ static void cmd_mem(void)
     vga_puts("  0xB8000    – 0xBFFFF     :  VGA frame buffer\n");
     vga_puts_color("\n  TODO: Use BIOS int 0x15, EAX=0xE820 to get real memory map\n\n",
                    VGA_YELLOW, VGA_BLACK);
+}
+
+
+static void cmd_ps(void)
+{
+    pcb_t *process;
+
+    vga_puts("\nPID    STATE\n");
+    vga_puts("----------------\n");
+
+    process = process_get_list();
+
+    if (process == 0)
+    {
+        vga_puts("No processes.\n\n");
+        return;
+    }
+
+    for (uint32_t i = 0; i < MAX_PROCESSES; i++)
+    {
+
+        if (process->pid == 0)
+        {
+            process++;
+            continue;
+        }
+
+        vga_puts("Process ");
+
+        if (process->pid == 1)
+        {
+            vga_puts("1");
+        }
+        else if (process->pid == 2)
+        {
+            vga_puts("2");
+        }
+        else if (process->pid == 3)
+        {
+            vga_puts("3");
+        }
+
+        vga_puts("     ");
+
+        if (process->state == PROC_RUNNING)
+        {
+            vga_puts("RUNNING");
+        }
+        else if (process->state == PROC_READY)
+        {
+            vga_puts("READY");
+        }
+        else
+        {
+            vga_puts("TERMINATED");
+        }
+
+        vga_puts("\n");
+
+        process++;
+    }
+
+    vga_puts("\n");
 }
 
 static void cmd_version(void)
@@ -289,6 +373,12 @@ static void shell_run(void)
             continue;
         }
 
+        if (k_strcmp(cmd, "ps") == 0)
+        {
+            cmd_ps();
+            continue;
+        }
+
         /* Milestone stubs */
         if (k_strcmp(cmd, "ps") == 0 ||
             k_strcmp(cmd, "kill") == 0 ||
@@ -317,6 +407,13 @@ void kernel_main(void)
     vga_init();
     kb_init();
     print_splash();
+
+    process_init();
+    scheduler_init();
+
+    process_create(process_a);
+    process_create(process_b);
+
     shell_run();
 
     /* Should never reach here */
