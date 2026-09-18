@@ -249,6 +249,24 @@ void pmm_init(void)
             used_frames++;
         }
     }
+
+    /*
+ * Reserve 1 MB RAM disk.
+ *
+ * RAM disk:
+ * 0x00100000 - 0x00200000
+ */
+for (j = 0x100000 / PAGE_SIZE;
+     j < 0x200000 / PAGE_SIZE &&
+     j < total_frames;
+     j++)
+{
+    if (!bitmap_test(j))
+    {
+        bitmap_set(j);
+        used_frames++;
+    }
+}
 }
 
 

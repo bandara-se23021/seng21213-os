@@ -30,6 +30,7 @@
 #include "mutex.h"
 #include "semaphore.h"
 #include "pmm.h"
+#include "fs.h"
 
 #define BUFFER_SIZE 4
 #define BUFFER_ITEMS 2
@@ -371,6 +372,11 @@ static void cmd_version(void);
 static void cmd_color(void);
 static void cmd_halt(void);
 static void cmd_ps(void);
+static void cmd_ls(void);
+static void cmd_touch(const char *args);
+static void cmd_cat(const char *args);
+static void cmd_write(const char *args);
+static void cmd_rm(const char *args);
 
 /* ---------------------------------------------------------------------------
  * Utility: minimal string helpers (no libc in a freestanding kernel!)
@@ -409,6 +415,42 @@ static const char *k_ltrim(const char *s)
     while (*s == ' ')
         s++;
     return s;
+}
+
+static const char *k_get_token(
+    const char *input,
+    char *token,
+    size_t token_size)
+{
+    size_t i;
+
+    i = 0;
+
+    while (*input == ' ')
+    {
+        input++;
+    }
+
+    while (*input != '\0' &&
+           *input != ' ')
+    {
+        if (i + 1 < token_size)
+        {
+            token[i] = *input;
+            i++;
+        }
+
+        input++;
+    }
+
+    token[i] = '\0';
+
+    while (*input == ' ')
+    {
+        input++;
+    }
+
+    return input;
 }
 
 /* ---------------------------------------------------------------------------
@@ -466,6 +508,11 @@ static void cmd_help(void)
     vga_puts("  mem     – Memory map (stub)\n");
     vga_puts("  ps      - List processes\n");
     vga_puts("  version - Show OS version\n");
+    vga_puts("  ls      - List files\n");
+    vga_puts("  touch   - Create a file\n");
+    vga_puts("  cat     - Read a file\n");
+    vga_puts("  write   - Write to a file\n");
+    vga_puts("  rm      - Delete a file\n");
     vga_puts("  color   - Test VGA colours\n");
     vga_puts("  halt    - Halt the CPU\n");
     vga_puts_color("\n  Milestones (to implement):\n", VGA_LIGHT_CYAN, VGA_BLACK);
@@ -577,6 +624,183 @@ static void cmd_ps(void)
     vga_puts("\n");
 }
 
+static void cmd_ls(void)
+{
+    fs_list();
+}
+
+static void cmd_touch(const char *args)
+{
+    char filename[32];
+    int fd;
+
+    args = k_get_token(
+        args,
+        filename,
+        sizeof(filename));
+
+    if (filename[0] == '\0')
+    {
+        vga_puts(
+            "Usage: touch <filename>\n");
+        return;
+    }
+
+    fd = fs_open(filename, 1);
+
+    if (fd < 0)
+    {
+        vga_puts(
+            "touch: failed to create file\n");
+        return;
+    }
+
+    fs_close(fd);
+
+    vga_printf(
+        "Created: %s\n",
+        filename);
+}
+
+static void cmd_cat(const char *args)
+{
+    char filename[32];
+    char buffer[256];
+
+    int fd;
+    int bytes;
+
+    args = k_get_token(
+        args,
+        filename,
+        sizeof(filename));
+
+    if (filename[0] == '\0')
+    {
+        vga_puts(
+            "Usage: cat <filename>\n");
+        return;
+    }
+
+    fd = fs_open(filename, 0);
+
+    if (fd < 0)
+    {
+        vga_puts(
+            "cat: file not found\n");
+        return;
+    }
+
+    bytes = fs_read(
+        fd,
+        buffer,
+        sizeof(buffer) - 1,
+        0);
+
+    if (bytes < 0)
+    {
+        vga_puts(
+            "cat: read error\n");
+
+        fs_close(fd);
+        return;
+    }
+
+    buffer[bytes] = '\0';
+
+    vga_puts(buffer);
+    vga_puts("\n");
+
+    fs_close(fd);
+}
+
+static void cmd_write(const char *args)
+{
+    char filename[32];
+    const char *content;
+
+    int fd;
+    int bytes;
+    uint32_t length;
+
+    content = k_get_token(
+        args,
+        filename,
+        sizeof(filename));
+
+    if (filename[0] == '\0' ||
+        *content == '\0')
+    {
+        vga_puts(
+            "Usage: write <filename> <text>\n");
+        return;
+    }
+
+    fd = fs_open(filename, 0);
+
+    if (fd < 0)
+    {
+        vga_puts(
+            "write: file not found\n");
+        return;
+    }
+
+    length = (uint32_t)k_strlen(content);
+
+    bytes = fs_write(
+        fd,
+        content,
+        length,
+        0);
+
+    if (bytes < 0)
+    {
+        vga_puts(
+            "write: write error\n");
+
+        fs_close(fd);
+        return;
+    }
+
+    fs_close(fd);
+
+    vga_printf(
+        "Wrote %d bytes to %s\n",
+        bytes,
+        filename);
+}
+
+static void cmd_rm(const char *args)
+{
+    char filename[32];
+    int result;
+
+    args = k_get_token(
+        args,
+        filename,
+        sizeof(filename));
+
+    if (filename[0] == '\0')
+    {
+        vga_puts(
+            "Usage: rm <filename>\n");
+        return;
+    }
+
+    result = fs_unlink(filename);
+
+    if (result < 0)
+    {
+        vga_puts(
+            "rm: file not found\n");
+        return;
+    }
+
+    vga_printf(
+        "Deleted: %s\n",
+        filename);
+}
+
 static void cmd_version(void)
 {
     vga_puts("\nSENG21213-OS Stage 0\n");
@@ -675,21 +899,53 @@ static void shell_run(void)
             continue;
         }
 
-        if (k_strcmp(cmd, "color") == 0)
-        {
-            cmd_color();
-            continue;
-        }
-
-        if (k_strcmp(cmd, "halt") == 0)
-        {
-            cmd_halt();
-            continue;
-        }
-
         if (k_strcmp(cmd, "ps") == 0)
         {
             cmd_ps();
+            continue;
+        }
+        if (k_strcmp(cmd, "ls") == 0)
+        {
+            cmd_ls();
+            continue;
+        }
+
+        if (k_strncmp(cmd, "touch ", 6) == 0)
+        {
+            cmd_touch(k_ltrim(cmd + 6));
+            continue;
+        }
+        if (k_strncmp(cmd, "cat ", 4) == 0)
+        {
+            cmd_cat(k_ltrim(cmd + 4));
+            continue;
+        }
+
+        if (k_strncmp(cmd, "write ", 6) == 0)
+        {
+            cmd_write(k_ltrim(cmd + 6));
+            continue;
+        }
+
+        if (k_strncmp(cmd, "rm ", 3) == 0)
+        {
+            cmd_rm(k_ltrim(cmd + 3));
+            continue;
+        }
+
+        if (k_strcmp(cmd, "ps") == 0 ||
+            k_strcmp(cmd, "kill") == 0 ||
+            k_strcmp(cmd, "threads") == 0 ||
+            k_strcmp(cmd, "free") == 0)
+        {
+            vga_puts_color(
+                "  [TODO] This command is not yet implemented.\n",
+                VGA_YELLOW,
+                VGA_BLACK);
+
+            vga_puts(
+                "  Implement it as part of your lecture assignment.\n");
+
             continue;
         }
 
@@ -734,28 +990,20 @@ void kernel_main(void)
     process_create(process_a);
     process_create(process_b);
 
-    /*
-     * Initialise the Stage 2 thread system
-     * before creating any threads.
-     */
     thread_init();
 
-
-    /*
-
-     * Run Stage 2 demonstrations.
-     */
+    /* Stage 2 */
     stage2_demo();
 
-    /* Stage 3 - Physical Memory Manager */
+    /* Stage 3 */
     pmm_init();
     pmm_test();
 
-    /*
-     * Start the interactive shell.
-     */
+    /* Stage 4 */
+    fs_init();
+
+    /* Interactive shell */
     shell_run();
 
-    /* Should never reach here */
     __asm__ __volatile__("hlt");
 }
