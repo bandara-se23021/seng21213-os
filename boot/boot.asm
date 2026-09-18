@@ -51,7 +51,48 @@ load_kernel:
     mov  si, msg_ok
     call print_rm
 
+        mov  si, msg_ok
+    call print_rm
+
+
 ; ---------------------------------------------------------------------------
+; Get BIOS E820 Memory Map
+;
+; E820 count  -> 0x4FFC
+; E820 entries -> 0x5000
+; ---------------------------------------------------------------------------
+get_e820:
+    xor  ax, ax
+    mov  es, ax
+
+    xor  ebx, ebx
+    mov  di, 0x5000
+    xor  bp, bp
+
+.e820_loop:
+    mov  eax, 0xE820
+    mov  edx, 0x534D4150
+    mov  ecx, 24
+
+    int 0x15
+
+    jc   .e820_done
+
+    cmp  eax, 0x534D4150
+    jne  .e820_done
+
+    inc  bp
+
+    add  di, 24
+
+    test ebx, ebx
+    jnz  .e820_loop
+
+.e820_done:
+
+    mov  [0x4FFC], bp
+;
+;---------------------------------------------------------------------------
 ; Enter Protected Mode
 ; ---------------------------------------------------------------------------
 enter_pm:

@@ -29,6 +29,7 @@
 #include "thread.h"
 #include "mutex.h"
 #include "semaphore.h"
+#include "pmm.h"
 
 #define BUFFER_SIZE 4
 #define BUFFER_ITEMS 2
@@ -333,6 +334,29 @@ static void process_b(void)
     {
         /* Process B */
     }
+}
+
+static void meminfo_command(void)
+{
+    uint32_t total;
+    uint32_t used;
+    uint32_t free;
+
+    total = pmm_get_total_memory();
+    used = pmm_get_used_memory();
+    free = pmm_get_free_memory();
+
+    vga_printf(
+        "Total memory : %d MB\n",
+        total / (1024 * 1024));
+
+    vga_printf(
+        "Used memory  : %d MB\n",
+        used / (1024 * 1024));
+
+    vga_printf(
+        "Free memory  : %d MB\n",
+        free / (1024 * 1024));
 }
 
 /* ---------------------------------------------------------------------------
@@ -669,6 +693,12 @@ static void shell_run(void)
             continue;
         }
 
+        if (k_strcmp(cmd, "meminfo") == 0)
+        {
+            meminfo_command();
+            continue;
+        }
+
         /* Milestone stubs */
         if (k_strcmp(cmd, "ps") == 0 ||
             k_strcmp(cmd, "kill") == 0 ||
@@ -710,10 +740,16 @@ void kernel_main(void)
      */
     thread_init();
 
+
     /*
+
      * Run Stage 2 demonstrations.
      */
     stage2_demo();
+
+    /* Stage 3 - Physical Memory Manager */
+    pmm_init();
+    pmm_test();
 
     /*
      * Start the interactive shell.
